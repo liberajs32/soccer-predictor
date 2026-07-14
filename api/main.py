@@ -5,6 +5,7 @@ Run locally with:
 """
 import sys
 import time
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -59,6 +60,7 @@ class Fixture(BaseModel):
 
 
 class Prediction(Fixture):
+    league: str
     elo_prob_home: float
     elo_prob_draw: float
     elo_prob_away: float
@@ -69,6 +71,21 @@ class Prediction(Fixture):
     ensemble_prob_draw: float
     ensemble_prob_away: float
     predicted_outcome: str  # from the ensemble blend, "H"/"D"/"A"
+    predicted_probability: float  # max(ensemble_prob_*) -- how confident the pick is
+
+
+class ComboLeg(BaseModel):
+    league: str
+    date: Optional[str]
+    home_team: str
+    away_team: str
+    predicted_outcome: str
+    predicted_probability: float
+
+
+class Combo(BaseModel):
+    legs: list[ComboLeg]
+    combined_probability: float
 
 
 def _market_probs(m: dict) -> tuple[float, float, float] | None:
@@ -150,9 +167,7 @@ def fixtures(league: str = Query(...)):
     return _fetch_upcoming(_db(), league)
 
 
-@app.get("/predictions", response_model=list[Prediction])
-def predictions(league: str = Query(...)):
-    _require_league(league)
+def _predict_league(league: str) -> list[Prediction]:
     upcoming = _fetch_upcoming(_db(), league)
     if not upcoming:
         return []
@@ -164,10 +179,12 @@ def predictions(league: str = Query(...)):
         elo_probs = elo.predict_proba(m["home_team"], m["away_team"])
         poisson_probs = poisson.predict_proba(m["home_team"], m["away_team"])
         ensemble_probs = blend_probs(elo_probs, poisson_probs, _market_probs(m))
-        predicted = ["H", "D", "A"][ensemble_probs.index(max(ensemble_probs))]
+        best_idx = ensemble_probs.index(max(ensemble_probs))
+        predicted = ["H", "D", "A"][best_idx]
         results.append(
             Prediction(
                 **m,
+                league=league,
                 elo_prob_home=elo_probs[0],
                 elo_prob_draw=elo_probs[1],
                 elo_prob_away=elo_probs[2],
@@ -178,6 +195,58 @@ def predictions(league: str = Query(...)):
                 ensemble_prob_draw=ensemble_probs[1],
                 ensemble_prob_away=ensemble_probs[2],
                 predicted_outcome=predicted,
+                predicted_probability=ensemble_probs[best_idx],
             )
         )
     return results
+
+
+@app.get("/predictions", response_model=list[Prediction])
+def predictions(league: str = Query(...)):
+    _require_league(league)
+    return _predict_league(league)
+
+
+COMBO_WINDOW_DAYS = 10
+
+
+@app.get("/combo", response_model=Combo)
+def combo(legs: int = Query(2, ge=2, le=4)):
+    """Recommend a same-day-actionable combo: the `legs` most confident
+    picks (highest ensemble win/draw/loss probability) across all leagues,
+    restricted to matches in the next COMBO_WINDOW_DAYS so it's something
+    you could actually bet on now rather than a lopsided fixture months out
+    that hasn't even got odds yet."""
+    cutoff = (date.today() + timedelta(days=COMBO_WINDOW_DAYS)).isoformat()
+
+    candidates: list[Prediction] = []
+    for league in LEAGUE_URL_SEGMENTS:
+        candidates.extend(p for p in _predict_league(league) if p.date and p.date <= cutoff)
+
+    if len(candidates) < legs:
+        raise HTTPException(
+            status_code=404,
+            detail=f"only {len(candidates)} upcoming matches in the next {COMBO_WINDOW_DAYS} days, need {legs}",
+        )
+
+    candidates.sort(key=lambda p: p.predicted_probability, reverse=True)
+    top = candidates[:legs]
+
+    combined = 1.0
+    for p in top:
+        combined *= p.predicted_probability
+
+    return Combo(
+        legs=[
+            ComboLeg(
+                league=p.league,
+                date=p.date,
+                home_team=p.home_team,
+                away_team=p.away_team,
+                predicted_outcome=p.predicted_outcome,
+                predicted_probability=p.predicted_probability,
+            )
+            for p in top
+        ],
+        combined_probability=combined,
+    )

@@ -186,3 +186,57 @@ body {
 .prob-cell.h .prob-cell-fill { background: #6fd7a1; }
 .prob-cell.d .prob-cell-fill { background: #d9c56f; }
 .prob-cell.a .prob-cell-fill { background: #d76f7f; }
+
+.combo-tab {
+  border-style: dashed;
+}
+
+.combo {
+  padding: 1rem;
+}
+
+.combo-intro {
+  font-size: 0.85rem;
+  color: #a9c9b8;
+  margin: 0 0 0.9rem;
+}
+
+.combo-legs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.combo-leg header .round {
+  font-weight: 600;
+  color: #6fd7a1;
+}
+
+.combo-result {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  background: #123b28;
+  border: 1px solid #6fd7a1;
+  border-radius: 12px;
+  padding: 0.9rem 1.1rem;
+  margin-top: 0.9rem;
+}
+
+.combo-result-label {
+  font-size: 0.85rem;
+  color: #cfe8d9;
+}
+
+.combo-result-pct {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #6fd7a1;
+  font-variant-numeric: tabular-nums;
+}
+
+.combo-caveat {
+  font-size: 0.72rem;
+  color: #6f9080;
+  margin: 0.7rem 0 0;
+}

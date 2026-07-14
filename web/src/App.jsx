@@ -10,6 +10,9 @@ const LEAGUES = [
   { code: 'BL1', label: '분데스리가' },
 ]
 
+const COMBO_TAB = 'COMBO'
+const LEAGUE_LABEL = Object.fromEntries(LEAGUES.map((l) => [l.code, l.label]))
+
 const OUTCOME_LABEL = { H: '홈승', D: '무', A: '원정승' }
 
 function formatDate(iso) {
@@ -121,25 +124,69 @@ function MatchCard({ match }) {
   )
 }
 
+function ComboView({ combo }) {
+  return (
+    <div className="combo">
+      <p className="combo-intro">
+        전 리그 통틀어 종합 예측 확신도가 가장 높은 {combo.legs.length}경기를 묶었습니다.
+      </p>
+      <div className="combo-legs">
+        {combo.legs.map((leg, i) => (
+          <article key={i} className="match-card combo-leg">
+            <header>
+              <span className="round">{LEAGUE_LABEL[leg.league] || leg.league}</span>
+              <span className="date">{formatDate(leg.date)}</span>
+            </header>
+            <div className="teams">
+              <span className="team home">{leg.home_team}</span>
+              <span className="vs">vs</span>
+              <span className="team away">{leg.away_team}</span>
+            </div>
+            <div className="model-row">
+              <span className="model-name">예측</span>
+              <span className="predicted-outcome">
+                {OUTCOME_LABEL[leg.predicted_outcome]} · {(leg.predicted_probability * 100).toFixed(0)}%
+              </span>
+            </div>
+          </article>
+        ))}
+      </div>
+      <div className="combo-result">
+        <span className="combo-result-label">조합 적중 확률</span>
+        <span className="combo-result-pct">{(combo.combined_probability * 100).toFixed(1)}%</span>
+      </div>
+      <p className="combo-caveat">
+        각 경기 확률을 단순히 곱한 값이라 실제와는 차이가 있을 수 있습니다. 참고용으로만 사용하세요.
+      </p>
+    </div>
+  )
+}
+
 function App() {
   const [league, setLeague] = useState('EPL')
   const [matches, setMatches] = useState([])
+  const [combo, setCombo] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+
+  const isCombo = league === COMBO_TAB
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
     setError(null)
 
-    fetch(`${API_BASE}/predictions?league=${league}`)
+    const url = isCombo ? `${API_BASE}/combo?legs=2` : `${API_BASE}/predictions?league=${league}`
+
+    fetch(url)
       .then((res) => {
         if (!res.ok) throw new Error(`API ${res.status}`)
         return res.json()
       })
       .then((data) => {
         if (cancelled) return
-        setMatches(data)
+        if (isCombo) setCombo(data)
+        else setMatches(data)
         setLoading(false)
       })
       .catch((err) => {
@@ -151,7 +198,7 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [league])
+  }, [league, isCombo])
 
   return (
     <div className="app">
@@ -167,20 +214,31 @@ function App() {
               {l.label}
             </button>
           ))}
+          <button
+            className={isCombo ? 'active combo-tab' : 'combo-tab'}
+            onClick={() => setLeague(COMBO_TAB)}
+          >
+            추천 조합
+          </button>
         </nav>
       </header>
 
       <main>
         {loading && <p className="status">불러오는 중...</p>}
         {error && <p className="status error">API 연결 실패: {error} (백엔드가 켜져 있는지 확인하세요)</p>}
-        {!loading && !error && matches.length === 0 && (
+
+        {!loading && !error && isCombo && combo && <ComboView combo={combo} />}
+
+        {!loading && !error && !isCombo && matches.length === 0 && (
           <p className="status">예정된 경기가 없습니다.</p>
         )}
-        <div className="match-list">
-          {matches.map((m) => (
-            <MatchCard key={m.id} match={m} />
-          ))}
-        </div>
+        {!isCombo && (
+          <div className="match-list">
+            {matches.map((m) => (
+              <MatchCard key={m.id} match={m} />
+            ))}
+          </div>
+        )}
       </main>
     </div>
   )
