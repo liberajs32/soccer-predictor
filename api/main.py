@@ -32,7 +32,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-CACHE_TTL_SECONDS = 1800
+# The underlying training data only changes once a day (the scheduled scrape
+# workflow), so there's no reason to ever refit more than once a day -- a
+# short TTL just means Render's slow/contended free-tier CPU pays the
+# refit cost (observed 1-2s locally, sometimes 90s+ on Render) far more
+# often than the data actually warrants.
+CACHE_TTL_SECONDS = 24 * 60 * 60
 _model_cache: dict[str, tuple[float, EloModel, PoissonModel]] = {}
 
 # One connection reused for the life of the process. Each get_connection()
