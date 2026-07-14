@@ -167,8 +167,14 @@ def fixtures(league: str = Query(...)):
     return _fetch_upcoming(_db(), league)
 
 
-def _predict_league(league: str) -> list[Prediction]:
+def _predict_league(league: str, max_date: str | None = None) -> list[Prediction]:
     upcoming = _fetch_upcoming(_db(), league)
+    if max_date:
+        # Predicting is real compute (Poisson/Elo predict_proba per match),
+        # not free even with a warm model cache -- a full EPL season is 380
+        # fixtures. /combo only needs the handful of near-term matches, so
+        # filter before predicting rather than after.
+        upcoming = [m for m in upcoming if m["date"] and m["date"] <= max_date]
     if not upcoming:
         return []
 
@@ -221,7 +227,7 @@ def combo(legs: int = Query(2, ge=2, le=4)):
 
     candidates: list[Prediction] = []
     for league in LEAGUE_URL_SEGMENTS:
-        candidates.extend(p for p in _predict_league(league) if p.date and p.date <= cutoff)
+        candidates.extend(_predict_league(league, max_date=cutoff))
 
     if len(candidates) < legs:
         raise HTTPException(
