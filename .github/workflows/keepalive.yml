@@ -9,6 +9,18 @@ on:
 jobs:
   ping:
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 5
     steps:
-      - run: curl -sf --max-time 60 https://soccer-predictor-api-58tj.onrender.com/leagues
+      # Hit /predictions for every league, not just /leagues -- this is what
+      # actually keeps each league's Elo/Poisson model cache warm (30 min
+      # TTL). /combo fits all 4 leagues' models in one request if none are
+      # cached, which is far too slow on Render's free-tier CPU (observed:
+      # times out past 3 minutes cold vs ~1s once warm), so the fix is
+      # making sure "cold" rarely happens rather than making /combo itself
+      # faster.
+      - name: Warm each league's model cache
+        run: |
+          for league in EPL K1 K2 BL1; do
+            echo "warming $league"
+            curl -sf --max-time 120 "https://soccer-predictor-api-58tj.onrender.com/predictions?league=$league" -o /dev/null
+          done

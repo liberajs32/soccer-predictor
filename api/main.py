@@ -32,7 +32,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-CACHE_TTL_SECONDS = 300
+CACHE_TTL_SECONDS = 1800
 _model_cache: dict[str, tuple[float, EloModel, PoissonModel]] = {}
 
 # One connection reused for the life of the process. Each get_connection()
