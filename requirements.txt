@@ -1,0 +1,7 @@
+requests
+beautifulsoup4
+fastapi
+uvicorn[standard]
+numpy
+scipy
+libsql-client

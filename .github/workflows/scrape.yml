@@ -1,0 +1,30 @@
+name: Refresh match data
+
+on:
+  schedule:
+    # 20:00 UTC = 05:00 KST
+    - cron: "0 20 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    env:
+      TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+      TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r requirements.txt
+
+      # Only the in-progress season + fixtures -- the 2020-2026 historical
+      # backfill is a one-time job, not something to redo daily.
+      - name: Refresh current-season results
+        run: python scraper/run_scrape.py --league EPL K1 K2 BL1 --season current --no-cache
+
+      - name: Refresh upcoming fixtures + odds
+        run: python scraper/run_scrape.py --league EPL K1 K2 BL1 --fixtures --no-cache

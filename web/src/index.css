@@ -1,0 +1,12 @@
+:root {
+  font: 16px/145% -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Malgun Gothic', sans-serif;
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+}
+
+h1, h2, p {
+  margin: 0;
+}
