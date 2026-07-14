@@ -224,19 +224,19 @@ COMBO_WINDOW_DAYS = 10
 
 @app.get("/combo", response_model=Combo)
 def combo(legs: int = Query(2, ge=2, le=4), outcome: Optional[str] = Query(None, pattern="^[HDA]$")):
-    """Recommend a same-round-actionable combo, restricted to matches in the
+    """Recommend a same-day-actionable combo, restricted to matches in the
     next COMBO_WINDOW_DAYS so it's something you could actually bet on now
     rather than a lopsided fixture months out that hasn't even got odds yet.
 
-    Legs are drawn from a single league's single round -- a K1 round-19 pick
-    and a K1 round-21 pick span different weeks of action, and "round" isn't
-    even comparable across leagues (K1's round 19 vs BL1's round 3), so
-    mixing rounds/leagues within one combo doesn't correspond to anything
-    you could actually bet on together. Every (league, round) group is
-    scored and the best one wins.
+    Legs are drawn from a single calendar date, but can mix leagues (a K1
+    pick and a K2 pick on the same day are fine) -- "round" isn't comparable
+    across leagues (K1's round 19 vs BL1's round 3 mean nothing next to each
+    other), so date is the league-agnostic stand-in for "this is one
+    coherent slate of matches." Every date's candidates are scored and the
+    best date wins.
 
     Without `outcome`: ranks by each match's own best-outcome probability --
-    may mix home/draw/away picks within the winning round.
+    may mix home/draw/away picks within the winning date.
 
     With `outcome=H`/`D`/`A`: forces every leg to that outcome (e.g. `D` for
     a "draw-draw" combo) and ranks by that outcome's probability specifically,
@@ -260,9 +260,14 @@ def combo(legs: int = Query(2, ge=2, le=4), outcome: Optional[str] = Query(None,
             for p in all_predictions
         ]
 
-    groups: dict[tuple[str, str], list] = {}
+    # Group by calendar date, not (league, round): round numbers aren't
+    # comparable across leagues (K1's round 19 means nothing next to BL1's
+    # round 3), but "these matches are all being played the same day" is a
+    # league-agnostic way to keep a combo temporally coherent while still
+    # allowing K1+K2+BL1 legs to mix.
+    groups: dict[str, list] = {}
     for c in scored:
-        key = (c[0].league, c[0].round or "")
+        key = c[0].date or ""
         groups.setdefault(key, []).append(c)
 
     best: tuple[list, float] | None = None
