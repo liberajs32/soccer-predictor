@@ -60,8 +60,21 @@ CREATE TABLE IF NOT EXISTS predictions (
 );
 """
 
-TURSO_URL = os.environ.get("TURSO_DATABASE_URL")
-TURSO_TOKEN = os.environ.get("TURSO_AUTH_TOKEN")
+def _clean_env(name: str) -> str | None:
+    """Strip whitespace and any stray non-ASCII characters picked up when
+    copy-pasting a secret through a browser/terminal -- both the URL and the
+    JWT auth token are pure ASCII by construction, so anything outside that
+    range is corruption, not intentional content, and would otherwise crash
+    deep inside urllib3 with an opaque UnicodeEncodeError when used as an
+    HTTP header value."""
+    value = os.environ.get(name)
+    if value is None:
+        return None
+    return value.strip().encode("ascii", "ignore").decode("ascii")
+
+
+TURSO_URL = _clean_env("TURSO_DATABASE_URL")
+TURSO_TOKEN = _clean_env("TURSO_AUTH_TOKEN")
 
 
 class _LibsqlCursor:
