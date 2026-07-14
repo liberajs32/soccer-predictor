@@ -1,0 +1,14 @@
+name: Keep backend warm
+
+on:
+  schedule:
+    # every 10 minutes -- Render's free tier spins down after ~15 minutes idle
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - run: curl -sf --max-time 60 https://soccer-predictor-api-58tj.onrender.com/leagues
