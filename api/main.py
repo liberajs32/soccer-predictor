@@ -254,14 +254,29 @@ def combo(legs: int = Query(2, ge=2, le=4), outcome: Optional[str] = Query(None,
             for p in all_predictions
         ]
 
-    if len(candidates) < legs:
+    candidates.sort(key=lambda c: c[1], reverse=True)
+
+    # A combo's legs are assumed independent when multiplying their
+    # probabilities together -- that breaks if the same team shows up twice
+    # (its current form/rotation correlates both results), so skip any
+    # candidate that shares a team with a leg already picked.
+    top = []
+    used_teams: set[str] = set()
+    for c in candidates:
+        p = c[0]
+        teams = {p.home_team, p.away_team}
+        if teams & used_teams:
+            continue
+        top.append(c)
+        used_teams |= teams
+        if len(top) == legs:
+            break
+
+    if len(top) < legs:
         raise HTTPException(
             status_code=404,
-            detail=f"only {len(candidates)} upcoming matches in the next {COMBO_WINDOW_DAYS} days, need {legs}",
+            detail=f"only {len(top)} matches with non-overlapping teams in the next {COMBO_WINDOW_DAYS} days, need {legs}",
         )
-
-    candidates.sort(key=lambda c: c[1], reverse=True)
-    top = candidates[:legs]
 
     combined = 1.0
     for _, prob, _, _ in top:
