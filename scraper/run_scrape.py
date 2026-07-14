@@ -32,31 +32,34 @@ def main() -> None:
     args = parser.parse_args()
 
     conn = get_connection()
-    total = 0
+    try:
+        total = 0
 
-    if args.fixtures:
+        if args.fixtures:
+            for league in args.league:
+                records = fetch_fixtures(league, use_cache=not args.no_cache)
+                written = upsert_matches(conn, records)
+                total += written
+                print(f"{league} fixtures: {written} matches")
+            print(f"Total: {total} matches written to {Path('data/soccer.db').resolve()}")
+            return
+
         for league in args.league:
-            records = fetch_fixtures(league, use_cache=not args.no_cache)
-            written = upsert_matches(conn, records)
-            total += written
-            print(f"{league} fixtures: {written} matches")
+            if args.season:
+                seasons = [args.season]
+            elif args.seasons_back:
+                seasons = recent_seasons(args.seasons_back, args.end_year, league)
+            else:
+                seasons = ["current"]
+
+            for season in seasons:
+                records = fetch_season(league, season, use_cache=not args.no_cache)
+                written = upsert_matches(conn, records)
+                total += written
+                print(f"{league} {season}: {written} matches")
         print(f"Total: {total} matches written to {Path('data/soccer.db').resolve()}")
-        return
-
-    for league in args.league:
-        if args.season:
-            seasons = [args.season]
-        elif args.seasons_back:
-            seasons = recent_seasons(args.seasons_back, args.end_year, league)
-        else:
-            seasons = ["current"]
-
-        for season in seasons:
-            records = fetch_season(league, season, use_cache=not args.no_cache)
-            written = upsert_matches(conn, records)
-            total += written
-            print(f"{league} {season}: {written} matches")
-    print(f"Total: {total} matches written to {Path('data/soccer.db').resolve()}")
+    finally:
+        conn.close()
 
 
 if __name__ == "__main__":

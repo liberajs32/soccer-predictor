@@ -112,7 +112,15 @@ def get_connection():
         http_url = TURSO_URL.replace("libsql://", "https://", 1)
         client = libsql_client.create_client_sync(url=http_url, auth_token=TURSO_TOKEN)
         conn = _LibsqlConnection(client)
-        conn.executescript(SCHEMA)
+        try:
+            conn.executescript(SCHEMA)
+        except Exception:
+            # If schema setup fails (bad credentials, network hiccup), close
+            # the client before re-raising -- it owns a background thread
+            # that isn't a daemon, so an unclosed client here hangs the
+            # whole process on exit instead of surfacing the real error.
+            conn.close()
+            raise
         return conn
 
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
