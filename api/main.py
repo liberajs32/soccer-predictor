@@ -86,6 +86,7 @@ class ComboLeg(BaseModel):
     away_team: str
     predicted_outcome: str
     predicted_probability: float
+    odds: Optional[float]  # market odds for predicted_outcome, if posted yet
 
 
 class Combo(BaseModel):
@@ -222,17 +223,36 @@ COMBO_WINDOW_DAYS = 10
 
 
 @app.get("/combo", response_model=Combo)
-def combo(legs: int = Query(2, ge=2, le=4)):
-    """Recommend a same-day-actionable combo: the `legs` most confident
-    picks (highest ensemble win/draw/loss probability) across all leagues,
-    restricted to matches in the next COMBO_WINDOW_DAYS so it's something
-    you could actually bet on now rather than a lopsided fixture months out
-    that hasn't even got odds yet."""
+def combo(legs: int = Query(2, ge=2, le=4), outcome: Optional[str] = Query(None, pattern="^[HDA]$")):
+    """Recommend a same-day-actionable combo, restricted to matches in the
+    next COMBO_WINDOW_DAYS so it's something you could actually bet on now
+    rather than a lopsided fixture months out that hasn't even got odds yet.
+
+    Without `outcome`: the `legs` most confident picks overall (highest
+    ensemble probability for that match's own best outcome), across all
+    leagues -- may mix home/draw/away picks.
+
+    With `outcome=H`/`D`/`A`: forces every leg to that outcome (e.g. `D` for
+    a "draw-draw" combo) and ranks by that outcome's probability specifically,
+    even on matches where it isn't the single most likely result -- draws pay
+    out more, so "most likely draw" and "most likely overall" are different
+    questions."""
     cutoff = (date.today() + timedelta(days=COMBO_WINDOW_DAYS)).isoformat()
 
-    candidates: list[Prediction] = []
+    all_predictions: list[Prediction] = []
     for league in LEAGUE_URL_SEGMENTS:
-        candidates.extend(_predict_league(league, max_date=cutoff))
+        all_predictions.extend(_predict_league(league, max_date=cutoff))
+
+    if outcome:
+        prob_field = {"H": "ensemble_prob_home", "D": "ensemble_prob_draw", "A": "ensemble_prob_away"}[outcome]
+        odds_field = {"H": "odds_home", "D": "odds_draw", "A": "odds_away"}[outcome]
+        candidates = [(p, getattr(p, prob_field), getattr(p, odds_field), outcome) for p in all_predictions]
+    else:
+        outcome_odds_field = {"H": "odds_home", "D": "odds_draw", "A": "odds_away"}
+        candidates = [
+            (p, p.predicted_probability, getattr(p, outcome_odds_field[p.predicted_outcome]), p.predicted_outcome)
+            for p in all_predictions
+        ]
 
     if len(candidates) < legs:
         raise HTTPException(
@@ -240,12 +260,12 @@ def combo(legs: int = Query(2, ge=2, le=4)):
             detail=f"only {len(candidates)} upcoming matches in the next {COMBO_WINDOW_DAYS} days, need {legs}",
         )
 
-    candidates.sort(key=lambda p: p.predicted_probability, reverse=True)
+    candidates.sort(key=lambda c: c[1], reverse=True)
     top = candidates[:legs]
 
     combined = 1.0
-    for p in top:
-        combined *= p.predicted_probability
+    for _, prob, _, _ in top:
+        combined *= prob
 
     return Combo(
         legs=[
@@ -254,10 +274,11 @@ def combo(legs: int = Query(2, ge=2, le=4)):
                 date=p.date,
                 home_team=p.home_team,
                 away_team=p.away_team,
-                predicted_outcome=p.predicted_outcome,
-                predicted_probability=p.predicted_probability,
+                predicted_outcome=leg_outcome,
+                predicted_probability=prob,
+                odds=odds,
             )
-            for p in top
+            for p, prob, odds, leg_outcome in top
         ],
         combined_probability=combined,
     )

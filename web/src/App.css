@@ -195,6 +195,29 @@ body {
   padding: 1rem;
 }
 
+.combo-outcome-tabs {
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 0.9rem;
+}
+
+.combo-outcome-tabs button {
+  flex: 1;
+  padding: 0.45rem 0.5rem;
+  border-radius: 8px;
+  border: 1px solid #2a4a3a;
+  background: transparent;
+  color: #cfe8d9;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.combo-outcome-tabs button.active {
+  background: #125a3c;
+  border-color: #125a3c;
+  color: #fff;
+}
+
 .combo-intro {
   font-size: 0.85rem;
   color: #a9c9b8;

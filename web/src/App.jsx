@@ -124,12 +124,34 @@ function MatchCard({ match }) {
   )
 }
 
-function ComboView({ combo }) {
+const COMBO_OUTCOME_OPTIONS = [
+  { value: '', label: '종합' },
+  { value: 'H', label: '홈승' },
+  { value: 'D', label: '무무' },
+  { value: 'A', label: '원정승' },
+]
+
+function comboIntro(outcome, n) {
+  if (!outcome) return `전 리그 통틀어 종합 예측 확신도가 가장 높은 ${n}경기를 묶었습니다.`
+  const label = OUTCOME_LABEL[outcome]
+  return `전 리그 통틀어 "${label}" 확률이 가장 높은 ${n}경기를 묶었습니다. 그 경기의 최선 예측이 아니어도, ${label} 확률 자체가 높은 순으로 골랐습니다.`
+}
+
+function ComboView({ combo, outcome, onOutcomeChange }) {
   return (
     <div className="combo">
-      <p className="combo-intro">
-        전 리그 통틀어 종합 예측 확신도가 가장 높은 {combo.legs.length}경기를 묶었습니다.
-      </p>
+      <div className="combo-outcome-tabs">
+        {COMBO_OUTCOME_OPTIONS.map((o) => (
+          <button
+            key={o.value}
+            className={o.value === outcome ? 'active' : ''}
+            onClick={() => onOutcomeChange(o.value)}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+      <p className="combo-intro">{comboIntro(outcome, combo.legs.length)}</p>
       <div className="combo-legs">
         {combo.legs.map((leg, i) => (
           <article key={i} className="match-card combo-leg">
@@ -148,6 +170,12 @@ function ComboView({ combo }) {
                 {OUTCOME_LABEL[leg.predicted_outcome]} · {(leg.predicted_probability * 100).toFixed(0)}%
               </span>
             </div>
+            {leg.odds != null && (
+              <div className="model-row secondary">
+                <span className="model-name">배당</span>
+                <span className="odds-caption">{leg.odds}</span>
+              </div>
+            )}
           </article>
         ))}
       </div>
@@ -166,6 +194,7 @@ function App() {
   const [league, setLeague] = useState('EPL')
   const [matches, setMatches] = useState([])
   const [combo, setCombo] = useState(null)
+  const [comboOutcome, setComboOutcome] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -176,7 +205,9 @@ function App() {
     setLoading(true)
     setError(null)
 
-    const url = isCombo ? `${API_BASE}/combo?legs=2` : `${API_BASE}/predictions?league=${league}`
+    const url = isCombo
+      ? `${API_BASE}/combo?legs=2${comboOutcome ? `&outcome=${comboOutcome}` : ''}`
+      : `${API_BASE}/predictions?league=${league}`
 
     fetch(url)
       .then((res) => {
@@ -198,7 +229,7 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [league, isCombo])
+  }, [league, isCombo, comboOutcome])
 
   return (
     <div className="app">
@@ -227,7 +258,9 @@ function App() {
         {loading && <p className="status">불러오는 중...</p>}
         {error && <p className="status error">API 연결 실패: {error} (백엔드가 켜져 있는지 확인하세요)</p>}
 
-        {!loading && !error && isCombo && combo && <ComboView combo={combo} />}
+        {!loading && !error && isCombo && combo && (
+          <ComboView combo={combo} outcome={comboOutcome} onOutcomeChange={setComboOutcome} />
+        )}
 
         {!loading && !error && !isCombo && matches.length === 0 && (
           <p className="status">예정된 경기가 없습니다.</p>
