@@ -224,13 +224,19 @@ COMBO_WINDOW_DAYS = 10
 
 @app.get("/combo", response_model=Combo)
 def combo(legs: int = Query(2, ge=2, le=4), outcome: Optional[str] = Query(None, pattern="^[HDA]$")):
-    """Recommend a same-day-actionable combo, restricted to matches in the
+    """Recommend a same-round-actionable combo, restricted to matches in the
     next COMBO_WINDOW_DAYS so it's something you could actually bet on now
     rather than a lopsided fixture months out that hasn't even got odds yet.
 
-    Without `outcome`: the `legs` most confident picks overall (highest
-    ensemble probability for that match's own best outcome), across all
-    leagues -- may mix home/draw/away picks.
+    Legs are drawn from a single league's single round -- a K1 round-19 pick
+    and a K1 round-21 pick span different weeks of action, and "round" isn't
+    even comparable across leagues (K1's round 19 vs BL1's round 3), so
+    mixing rounds/leagues within one combo doesn't correspond to anything
+    you could actually bet on together. Every (league, round) group is
+    scored and the best one wins.
+
+    Without `outcome`: ranks by each match's own best-outcome probability --
+    may mix home/draw/away picks within the winning round.
 
     With `outcome=H`/`D`/`A`: forces every leg to that outcome (e.g. `D` for
     a "draw-draw" combo) and ranks by that outcome's probability specifically,
@@ -246,41 +252,55 @@ def combo(legs: int = Query(2, ge=2, le=4), outcome: Optional[str] = Query(None,
     if outcome:
         prob_field = {"H": "ensemble_prob_home", "D": "ensemble_prob_draw", "A": "ensemble_prob_away"}[outcome]
         odds_field = {"H": "odds_home", "D": "odds_draw", "A": "odds_away"}[outcome]
-        candidates = [(p, getattr(p, prob_field), getattr(p, odds_field), outcome) for p in all_predictions]
+        scored = [(p, getattr(p, prob_field), getattr(p, odds_field), outcome) for p in all_predictions]
     else:
         outcome_odds_field = {"H": "odds_home", "D": "odds_draw", "A": "odds_away"}
-        candidates = [
+        scored = [
             (p, p.predicted_probability, getattr(p, outcome_odds_field[p.predicted_outcome]), p.predicted_outcome)
             for p in all_predictions
         ]
 
-    candidates.sort(key=lambda c: c[1], reverse=True)
+    groups: dict[tuple[str, str], list] = {}
+    for c in scored:
+        key = (c[0].league, c[0].round or "")
+        groups.setdefault(key, []).append(c)
 
-    # A combo's legs are assumed independent when multiplying their
-    # probabilities together -- that breaks if the same team shows up twice
-    # (its current form/rotation correlates both results), so skip any
-    # candidate that shares a team with a leg already picked.
-    top = []
-    used_teams: set[str] = set()
-    for c in candidates:
-        p = c[0]
-        teams = {p.home_team, p.away_team}
-        if teams & used_teams:
+    best: tuple[list, float] | None = None
+    for group in groups.values():
+        group.sort(key=lambda c: c[1], reverse=True)
+
+        # A combo's legs are assumed independent when multiplying their
+        # probabilities together -- that breaks if the same team shows up
+        # twice (its current form/rotation correlates both results), so skip
+        # any candidate that shares a team with a leg already picked.
+        chosen = []
+        used_teams: set[str] = set()
+        for c in group:
+            teams = {c[0].home_team, c[0].away_team}
+            if teams & used_teams:
+                continue
+            chosen.append(c)
+            used_teams |= teams
+            if len(chosen) == legs:
+                break
+
+        if len(chosen) < legs:
             continue
-        top.append(c)
-        used_teams |= teams
-        if len(top) == legs:
-            break
 
-    if len(top) < legs:
+        combined = 1.0
+        for _, prob, _, _ in chosen:
+            combined *= prob
+
+        if best is None or combined > best[1]:
+            best = (chosen, combined)
+
+    if best is None:
         raise HTTPException(
             status_code=404,
-            detail=f"only {len(top)} matches with non-overlapping teams in the next {COMBO_WINDOW_DAYS} days, need {legs}",
+            detail=f"no single round has {legs} matches with non-overlapping teams in the next {COMBO_WINDOW_DAYS} days",
         )
 
-    combined = 1.0
-    for _, prob, _, _ in top:
-        combined *= prob
+    top, combined = best
 
     return Combo(
         legs=[
