@@ -4,4 +4,3 @@ fastapi
 uvicorn[standard]
 numpy
 scipy
-libsql-client

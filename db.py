@@ -8,12 +8,24 @@ Two backends, chosen by environment variables:
     the default so local development needs no Turso account.
 
 Callers (scraper/, model/, api/) only use conn.execute(sql, params).fetchall()
-/.fetchone() and conn.commit(), so the Turso branch wraps libsql_client's
-ClientSync behind that same shape rather than changing any call sites.
+/.fetchone() and conn.commit(), so the Turso branch wraps a small HTTP client
+behind that same shape rather than changing any call sites.
+
+The Turso branch talks to Turso's HTTP (Hrana-over-HTTP) API directly with
+`requests` instead of the `libsql_client` package: that package's requests
+reliably succeeded when run locally but failed every time from GitHub
+Actions with an opaque "HTTP status 400" (same credentials, same code --
+narrowed down by replaying the same call with plain `requests` and reading
+the actual response body, which the library discards). Talking to the
+documented v1/execute and v2/pipeline endpoints ourselves sidesteps whatever
+that library was doing differently, and is easier to debug if it ever
+breaks again since the wire format is fully visible here.
 """
 import os
 import sqlite3
 from pathlib import Path
+
+import requests
 
 DB_PATH = Path(__file__).resolve().parent / "data" / "soccer.db"
 
@@ -63,64 +75,100 @@ class _LibsqlCursor:
         return self._rows[0] if self._rows else None
 
 
-class _LibsqlConnection:
-    """Makes libsql_client.ClientSync look like sqlite3.Connection for the
-    subset of the API this project uses."""
+def _to_hrana_value(v):
+    """Python value -> Turso's typed-value wire format."""
+    if v is None:
+        return {"type": "null"}
+    if isinstance(v, bool):  # bool is an int subclass -- check first
+        return {"type": "integer", "value": str(int(v))}
+    if isinstance(v, int):
+        return {"type": "integer", "value": str(v)}
+    if isinstance(v, float):
+        return {"type": "float", "value": v}
+    return {"type": "text", "value": str(v)}
 
-    def __init__(self, client):
-        self._client = client
+
+def _from_hrana_value(cell: dict):
+    """Turso's typed-value wire format -> plain Python value."""
+    t = cell.get("type")
+    if t == "null":
+        return None
+    if t == "integer":
+        return int(cell["value"])
+    if t == "float":
+        return cell["value"]
+    return cell["value"]
+
+
+class _TursoConnection:
+    """Talks to Turso's HTTP API (v1/execute, v2/pipeline) directly and
+    looks like sqlite3.Connection for the subset of the API this project
+    uses."""
+
+    def __init__(self, base_url: str, token: str):
+        self._base_url = base_url.rstrip("/")
+        self._session = requests.Session()
+        self._session.headers.update({"Authorization": f"Bearer {token}"})
+
+    def _stmt(self, sql: str, params) -> dict:
+        stmt = {"sql": sql}
+        if params:
+            stmt["args"] = [_to_hrana_value(p) for p in params]
+        return stmt
+
+    def _rows_from_result(self, result: dict) -> list[dict]:
+        cols = [c["name"] for c in result["cols"]]
+        return [dict(zip(cols, (_from_hrana_value(cell) for cell in row))) for row in result["rows"]]
 
     def execute(self, sql: str, params=()):
-        result = self._client.execute(sql, list(params) if params else None)
-        rows = [dict(zip(result.columns, row)) for row in result.rows]
-        return _LibsqlCursor(rows)
+        resp = self._session.post(
+            f"{self._base_url}/v1/execute", json={"stmt": self._stmt(sql, params)}, timeout=30
+        )
+        if resp.status_code != 200:
+            raise RuntimeError(f"Turso execute failed ({resp.status_code}): {resp.text}")
+        result = resp.json()["result"]
+        return _LibsqlCursor(self._rows_from_result(result))
 
     def executescript(self, sql: str) -> None:
         for stmt in (s.strip() for s in sql.split(";")):
             if stmt:
-                self._client.execute(stmt)
+                self.execute(stmt)
 
     def batch_execute(self, statements: list[tuple[str, tuple]]) -> None:
         """Run many (sql, params) pairs in as few HTTP round-trips as
-        possible. upsert_matches() writes thousands of rows one at a time
-        over Turso's HTTP API each execute() is its own request, so a plain
-        per-row loop takes minutes; batching cuts that to a handful of
-        requests."""
-        import libsql_client
-
+        possible via Turso's v2/pipeline endpoint. upsert_matches() writes
+        thousands of rows, and one HTTP round-trip per row takes minutes;
+        batching cuts that to a handful of requests."""
         CHUNK = 200
-        stmts = [libsql_client.Statement(sql, list(params) if params else None) for sql, params in statements]
-        for i in range(0, len(stmts), CHUNK):
-            self._client.batch(stmts[i:i + CHUNK])
+        for i in range(0, len(statements), CHUNK):
+            chunk = statements[i:i + CHUNK]
+            body = {
+                "requests": [
+                    {"type": "execute", "stmt": self._stmt(sql, params)} for sql, params in chunk
+                ]
+                + [{"type": "close"}]
+            }
+            resp = self._session.post(f"{self._base_url}/v2/pipeline", json=body, timeout=60)
+            if resp.status_code != 200:
+                raise RuntimeError(f"Turso batch failed ({resp.status_code}): {resp.text}")
+            for item in resp.json()["results"]:
+                if item["type"] == "error":
+                    raise RuntimeError(f"Turso batch statement failed: {item['error']}")
 
     def commit(self) -> None:
-        pass  # libsql_client commits each standalone execute() immediately
+        pass  # each request commits immediately; there's no open transaction to flush
 
     def close(self) -> None:
-        self._client.close()
+        self._session.close()
 
 
 def get_connection():
     if TURSO_URL and TURSO_TOKEN:
-        import libsql_client
-
-        # Turso's dashboard hands out "libsql://" URLs, which libsql_client
-        # opens as a websocket (wss://) connection -- that handshake fails
-        # in some sandboxed/CI network environments. The plain HTTP API
-        # (https://) hits the same database and works everywhere, so swap
-        # the scheme rather than asking users to edit the URL themselves.
+        # Turso's dashboard hands out "libsql://" URLs; the plain HTTP API
+        # (https://) hits the same database.
         http_url = TURSO_URL.replace("libsql://", "https://", 1)
-        client = libsql_client.create_client_sync(url=http_url, auth_token=TURSO_TOKEN)
-        conn = _LibsqlConnection(client)
-        try:
-            conn.executescript(SCHEMA)
-        except Exception:
-            # If schema setup fails (bad credentials, network hiccup), close
-            # the client before re-raising -- it owns a background thread
-            # that isn't a daemon, so an unclosed client here hangs the
-            # whole process on exit instead of surfacing the real error.
-            conn.close()
-            raise
+        conn = _TursoConnection(http_url, TURSO_TOKEN)
+        conn.executescript(SCHEMA)
         return conn
 
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
