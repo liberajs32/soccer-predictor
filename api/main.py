@@ -34,6 +34,18 @@ app.add_middleware(
 CACHE_TTL_SECONDS = 300
 _model_cache: dict[str, tuple[float, EloModel, PoissonModel]] = {}
 
+# One connection reused for the life of the process. Each get_connection()
+# call spins up a new client (for Turso, a background thread + HTTP session),
+# so calling it fresh per-request would leak resources over time.
+_conn = None
+
+
+def _db():
+    global _conn
+    if _conn is None:
+        _conn = get_connection()
+    return _conn
+
 
 class Fixture(BaseModel):
     id: int
@@ -109,8 +121,7 @@ def _get_models(league: str) -> tuple[EloModel, PoissonModel]:
     if cached and time.monotonic() - cached[0] < CACHE_TTL_SECONDS:
         return cached[1], cached[2]
 
-    conn = get_connection()
-    decided = _fetch_decided(conn, league)
+    decided = _fetch_decided(_db(), league)
 
     elo = EloModel()
     pairs = []
@@ -136,15 +147,13 @@ def leagues() -> list[str]:
 @app.get("/fixtures", response_model=list[Fixture])
 def fixtures(league: str = Query(...)):
     _require_league(league)
-    conn = get_connection()
-    return _fetch_upcoming(conn, league)
+    return _fetch_upcoming(_db(), league)
 
 
 @app.get("/predictions", response_model=list[Prediction])
 def predictions(league: str = Query(...)):
     _require_league(league)
-    conn = get_connection()
-    upcoming = _fetch_upcoming(conn, league)
+    upcoming = _fetch_upcoming(_db(), league)
     if not upcoming:
         return []
 

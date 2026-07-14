@@ -56,6 +56,7 @@ def main() -> None:
     turso_conn = get_connection()
     written = upsert_matches(turso_conn, records)
     print(f"Wrote {written} rows to Turso ({TURSO_URL})")
+    turso_conn.close()
 
 
 if __name__ == "__main__":

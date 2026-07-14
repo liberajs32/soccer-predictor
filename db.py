@@ -80,6 +80,19 @@ class _LibsqlConnection:
             if stmt:
                 self._client.execute(stmt)
 
+    def batch_execute(self, statements: list[tuple[str, tuple]]) -> None:
+        """Run many (sql, params) pairs in as few HTTP round-trips as
+        possible. upsert_matches() writes thousands of rows one at a time
+        over Turso's HTTP API each execute() is its own request, so a plain
+        per-row loop takes minutes; batching cuts that to a handful of
+        requests."""
+        import libsql_client
+
+        CHUNK = 200
+        stmts = [libsql_client.Statement(sql, list(params) if params else None) for sql, params in statements]
+        for i in range(0, len(stmts), CHUNK):
+            self._client.batch(stmts[i:i + CHUNK])
+
     def commit(self) -> None:
         pass  # libsql_client commits each standalone execute() immediately
 
@@ -91,7 +104,13 @@ def get_connection():
     if TURSO_URL and TURSO_TOKEN:
         import libsql_client
 
-        client = libsql_client.create_client_sync(url=TURSO_URL, auth_token=TURSO_TOKEN)
+        # Turso's dashboard hands out "libsql://" URLs, which libsql_client
+        # opens as a websocket (wss://) connection -- that handshake fails
+        # in some sandboxed/CI network environments. The plain HTTP API
+        # (https://) hits the same database and works everywhere, so swap
+        # the scheme rather than asking users to edit the URL themselves.
+        http_url = TURSO_URL.replace("libsql://", "https://", 1)
+        client = libsql_client.create_client_sync(url=http_url, auth_token=TURSO_TOKEN)
         conn = _LibsqlConnection(client)
         conn.executescript(SCHEMA)
         return conn
@@ -103,32 +122,39 @@ def get_connection():
     return conn
 
 
+_UPSERT_SQL = """
+INSERT INTO matches
+    (league, season, round, date, home_team, away_team,
+     home_score, away_score, odds_home, odds_draw, odds_away, source_url)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(league, season, home_team, away_team, date) DO UPDATE SET
+    round=excluded.round,
+    home_score=excluded.home_score,
+    away_score=excluded.away_score,
+    odds_home=excluded.odds_home,
+    odds_draw=excluded.odds_draw,
+    odds_away=excluded.odds_away,
+    source_url=excluded.source_url,
+    scraped_at=datetime('now')
+"""
+
+
 def upsert_matches(conn, records) -> int:
     """Insert MatchRecord-like objects, updating scores/odds on conflict. Returns rows written."""
-    count = 0
-    for r in records:
-        conn.execute(
-            """
-            INSERT INTO matches
-                (league, season, round, date, home_team, away_team,
-                 home_score, away_score, odds_home, odds_draw, odds_away, source_url)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(league, season, home_team, away_team, date) DO UPDATE SET
-                round=excluded.round,
-                home_score=excluded.home_score,
-                away_score=excluded.away_score,
-                odds_home=excluded.odds_home,
-                odds_draw=excluded.odds_draw,
-                odds_away=excluded.odds_away,
-                source_url=excluded.source_url,
-                scraped_at=datetime('now')
-            """,
-            (
-                r.league, r.season, r.round, r.date, r.home_team, r.away_team,
-                r.home_score, r.away_score, r.odds_home, r.odds_draw, r.odds_away,
-                r.source_url,
-            ),
+    params_list = [
+        (
+            r.league, r.season, r.round, r.date, r.home_team, r.away_team,
+            r.home_score, r.away_score, r.odds_home, r.odds_draw, r.odds_away,
+            r.source_url,
         )
-        count += 1
+        for r in records
+    ]
+
+    if hasattr(conn, "batch_execute"):
+        conn.batch_execute([(_UPSERT_SQL, params) for params in params_list])
+        return len(params_list)
+
+    for params in params_list:
+        conn.execute(_UPSERT_SQL, params)
     conn.commit()
-    return count
+    return len(params_list)
