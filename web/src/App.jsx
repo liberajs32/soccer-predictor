@@ -197,6 +197,9 @@ function App() {
   const [comboOutcome, setComboOutcome] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [refreshState, setRefreshState] = useState('idle') // idle | loading | done | error
+  const [refreshMessage, setRefreshMessage] = useState('')
+  const [dataVersion, setDataVersion] = useState(0)
 
   const isCombo = league === COMBO_TAB
 
@@ -229,12 +232,44 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [league, isCombo, comboOutcome])
+  }, [league, isCombo, comboOutcome, dataVersion])
+
+  const handleRefresh = () => {
+    setRefreshState('loading')
+    setRefreshMessage('')
+    fetch(`${API_BASE}/refresh`, { method: 'POST' })
+      .then(async (res) => {
+        const body = await res.json()
+        if (!res.ok) throw new Error(body.detail || `API ${res.status}`)
+        return body
+      })
+      .then((body) => {
+        setRefreshState('done')
+        setRefreshMessage(`${body.updated_rows}건 갱신 완료`)
+        setDataVersion((v) => v + 1)
+      })
+      .catch((err) => {
+        setRefreshState('error')
+        setRefreshMessage(err.message)
+      })
+  }
 
   return (
     <div className="app">
       <header className="app-header">
-        <h1>축구 승무패 예측</h1>
+        <div className="app-header-top">
+          <h1>축구 승무패 예측</h1>
+          <button
+            className="refresh-button"
+            onClick={handleRefresh}
+            disabled={refreshState === 'loading'}
+          >
+            {refreshState === 'loading' ? '갱신 중...' : '새로고침'}
+          </button>
+        </div>
+        {refreshMessage && (
+          <p className={`refresh-message ${refreshState === 'error' ? 'error' : ''}`}>{refreshMessage}</p>
+        )}
         <nav className="league-tabs">
           {LEAGUES.map((l) => (
             <button

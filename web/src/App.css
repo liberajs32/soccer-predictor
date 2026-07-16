@@ -29,9 +29,43 @@ body {
   border-bottom: 1px solid #1c3a2c;
 }
 
+.app-header-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin: 0 0 0.5rem;
+}
+
 .app-header h1 {
   font-size: 1.25rem;
-  margin: 0 0 0.75rem;
+  margin: 0;
+}
+
+.refresh-button {
+  flex: none;
+  padding: 0.4rem 0.8rem;
+  border-radius: 999px;
+  border: 1px solid #2a4a3a;
+  background: transparent;
+  color: #cfe8d9;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.refresh-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.refresh-message {
+  font-size: 0.75rem;
+  color: #8fae9c;
+  margin: -0.2rem 0 0.6rem;
+}
+
+.refresh-message.error {
+  color: #e0897a;
 }
 
 .league-tabs {

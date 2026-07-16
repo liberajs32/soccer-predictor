@@ -17,18 +17,18 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from db import get_connection
+from db import get_connection, upsert_matches
 from elo import EloModel, outcome_label
 from ensemble import blend_probs
 from poisson import PoissonModel
-from betexplorer import LEAGUE_URL_SEGMENTS
+from betexplorer import LEAGUE_URL_SEGMENTS, fetch_fixtures, fetch_season
 
 app = FastAPI(title="Soccer 1X2 Predictor")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # personal/local project; tighten if ever deployed publicly
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
@@ -322,3 +322,38 @@ def combo(legs: int = Query(2, ge=2, le=4), outcome: Optional[str] = Query(None,
         ],
         combined_probability=combined,
     )
+
+
+class RefreshResult(BaseModel):
+    updated_rows: int
+    leagues: list[str]
+
+
+REFRESH_COOLDOWN_SECONDS = 15 * 60
+_last_refresh_at = 0.0
+
+
+@app.post("/refresh", response_model=RefreshResult)
+def refresh():
+    """Manually re-scrape fixtures/odds + current-season results right now,
+    for when the once-a-day schedule isn't fresh enough (e.g. checking odds
+    an hour before kickoff). Rate-limited so this can't be hammered into a
+    denial-of-service against BetExplorer -- it's meant to be pressed a
+    handful of times a day at most, not polled."""
+    global _last_refresh_at
+    now = time.monotonic()
+    elapsed = now - _last_refresh_at
+    if elapsed < REFRESH_COOLDOWN_SECONDS:
+        wait = int(REFRESH_COOLDOWN_SECONDS - elapsed)
+        raise HTTPException(status_code=429, detail=f"{wait}초 후 다시 시도해주세요")
+    _last_refresh_at = now
+
+    conn = _db()
+    total = 0
+    for league in LEAGUE_URL_SEGMENTS:
+        total += upsert_matches(conn, fetch_fixtures(league, use_cache=False))
+        total += upsert_matches(conn, fetch_season(league, "current", use_cache=False))
+
+    _model_cache.clear()  # force a refit on next request so it reflects the new data
+
+    return RefreshResult(updated_rows=total, leagues=sorted(LEAGUE_URL_SEGMENTS))
