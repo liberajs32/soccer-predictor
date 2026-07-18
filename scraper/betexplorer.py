@@ -27,7 +27,7 @@ empty for odds.
 """
 import re
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Optional
 from urllib.parse import urljoin
 
@@ -105,9 +105,28 @@ def _parse_score(text: str) -> tuple[Optional[int], Optional[int]]:
 def _resolve_date(day_month: str, season: str, league: str) -> Optional[str]:
     """"25.05." + season "2025-2026" -> "2026-05-25" (Aug-Dec -> first year,
     Jan-Jul -> second year). For calendar-year leagues (K1/K2), season "2025"
-    applies directly since the whole season falls in one calendar year."""
-    match = re.match(r"^(\d{1,2})\.(\d{1,2})\.", day_month.strip())
-    if not match or season == "current":
+    applies directly since the whole season falls in one calendar year.
+
+    For a match played on the current day, the results page prints the
+    literal word "Today" (and presumably "Yesterday" the day after) instead
+    of a "dd.mm." date -- resolved from the scraper's own run date, which
+    doesn't need a season year at all, so this is checked before the
+    season == "current" bail-out below (season=="current" is precisely the
+    case the daily scheduled refresh uses, so mishandling "Today" there
+    meant upsert_matches() -- keyed on league/season/home/away/date --
+    could never match a freshly-finished match back to its original
+    "upcoming" placeholder row, leaving it stuck forever)."""
+    text = day_month.strip()
+    if text.lower() == "today":
+        return datetime.now().date().isoformat()
+    if text.lower() == "yesterday":
+        return (datetime.now().date() - timedelta(days=1)).isoformat()
+
+    if season == "current":
+        return None
+
+    match = re.match(r"^(\d{1,2})\.(\d{1,2})\.", text)
+    if not match:
         return None
     day, month = int(match.group(1)), int(match.group(2))
     if league in CALENDAR_YEAR_LEAGUES:
