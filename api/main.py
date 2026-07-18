@@ -271,7 +271,12 @@ def combo(legs: int = Query(2, ge=2, le=4), outcome: Optional[str] = Query(None,
         groups.setdefault(key, []).append(c)
 
     best: tuple[list, float] | None = None
-    for group in groups.values():
+    # Earliest date first, and stop at the first date with a viable combo --
+    # this is meant to be checked shortly before today's kickoff, so "the
+    # nearest actionable slate" beats "whichever date within the next 10
+    # days happens to have the highest combined probability."
+    for match_date in sorted(groups):
+        group = groups[match_date]
         group.sort(key=lambda c: c[1], reverse=True)
 
         # A combo's legs are assumed independent when multiplying their
@@ -296,13 +301,13 @@ def combo(legs: int = Query(2, ge=2, le=4), outcome: Optional[str] = Query(None,
         for _, prob, _, _ in chosen:
             combined *= prob
 
-        if best is None or combined > best[1]:
-            best = (chosen, combined)
+        best = (chosen, combined)
+        break
 
     if best is None:
         raise HTTPException(
             status_code=404,
-            detail=f"no single round has {legs} matches with non-overlapping teams in the next {COMBO_WINDOW_DAYS} days",
+            detail=f"no single date has {legs} matches with non-overlapping teams in the next {COMBO_WINDOW_DAYS} days",
         )
 
     top, combined = best
