@@ -23,13 +23,20 @@ export default defineConfig({
         ],
       },
       workbox: {
-        // Cache the last predictions/fixtures response so the app still
-        // shows something (last-known data) when offline.
+        // Cache the last predictions/fixtures/combo response so the app
+        // still shows something (last-known data) when genuinely offline.
+        // Render's free tier can take 60-130s to respond cold (observed
+        // directly), so a short networkTimeoutSeconds here doesn't mean
+        // "offline" -- it means "serve stale data" while a real network
+        // response was still on its way, which is how an already-finished
+        // match kept showing as upcoming after a cold request. Only fall
+        // back to cache if the network genuinely doesn't answer within a
+        // window wider than any observed cold start.
         runtimeCaching: [
           {
-            urlPattern: ({ url }) => url.pathname === '/fixtures' || url.pathname === '/predictions',
+            urlPattern: ({ url }) => ['/fixtures', '/predictions', '/combo'].includes(url.pathname),
             handler: 'NetworkFirst',
-            options: { cacheName: 'api-cache', networkTimeoutSeconds: 4 },
+            options: { cacheName: 'api-cache', networkTimeoutSeconds: 60 },
           },
         ],
       },
