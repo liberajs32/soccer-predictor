@@ -5,6 +5,19 @@ services:
     plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn api.main:app --host 0.0.0.0 --port $PORT
+    # Frontend-only pushes were redeploying this service too, wiping the
+    # in-memory Elo/Poisson model cache for no reason and leaving the app
+    # slow until the next keep-alive warm-up. Only rebuild for changes that
+    # can actually affect the backend.
+    buildFilter:
+      paths:
+        - api/**
+        - model/**
+        - scraper/**
+        - db.py
+        - migrate_to_turso.py
+        - requirements.txt
+        - render.yaml
     envVars:
       - key: TURSO_DATABASE_URL
         sync: false
