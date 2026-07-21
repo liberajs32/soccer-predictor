@@ -82,11 +82,27 @@ class Prediction(Fixture):
 class ComboLeg(BaseModel):
     league: str
     date: Optional[str]
+    round: Optional[str]
     home_team: str
     away_team: str
     predicted_outcome: str
     predicted_probability: float
     odds: Optional[float]  # market odds for predicted_outcome, if posted yet
+
+    # Full breakdown so the UI can show a "detail view" per leg (same shape
+    # as /predictions) instead of just the one highlighted outcome.
+    elo_prob_home: float
+    elo_prob_draw: float
+    elo_prob_away: float
+    poisson_prob_home: float
+    poisson_prob_draw: float
+    poisson_prob_away: float
+    ensemble_prob_home: float
+    ensemble_prob_draw: float
+    ensemble_prob_away: float
+    odds_home: Optional[float]
+    odds_draw: Optional[float]
+    odds_away: Optional[float]
 
 
 class Combo(BaseModel):
@@ -220,23 +236,23 @@ def predictions(league: str = Query(...)):
 
 
 COMBO_WINDOW_DAYS = 10
+# How many days wide the "nearest round" pool is. A K League round alone can
+# span multiple days (Fri-Mon, or a Tue/Wed makeup slate), and picks should
+# be free to come from any of those days, not just the single closest one.
+ROUND_WINDOW_DAYS = 4
 
 
 @app.get("/combo", response_model=Combo)
 def combo(legs: int = Query(2, ge=2, le=4), outcome: Optional[str] = Query(None, pattern="^[HDA]$")):
-    """Recommend a same-day-actionable combo, restricted to matches in the
-    next COMBO_WINDOW_DAYS so it's something you could actually bet on now
-    rather than a lopsided fixture months out that hasn't even got odds yet.
-
-    Legs are drawn from a single calendar date, but can mix leagues (a K1
-    pick and a K2 pick on the same day are fine) -- "round" isn't comparable
-    across leagues (K1's round 19 vs BL1's round 3 mean nothing next to each
-    other), so date is the league-agnostic stand-in for "this is one
-    coherent slate of matches." Every date's candidates are scored and the
-    best date wins.
+    """Recommend a combo from the nearest ROUND_WINDOW_DAYS-day window of
+    matches (across all leagues -- "round" isn't comparable across leagues,
+    K1's round 19 vs BL1's round 3 mean nothing next to each other, so a
+    rolling date window is the league-agnostic stand-in for "this is the
+    next coherent slate of matches"), restricted overall to COMBO_WINDOW_DAYS
+    so it's never a lopsided fixture months out with no odds posted yet.
 
     Without `outcome`: ranks by each match's own best-outcome probability --
-    may mix home/draw/away picks within the winning date.
+    may mix home/draw/away picks.
 
     With `outcome=H`/`D`/`A`: forces every leg to that outcome (e.g. `D` for
     a "draw-draw" combo) and ranks by that outcome's probability specifically,
@@ -249,81 +265,74 @@ def combo(legs: int = Query(2, ge=2, le=4), outcome: Optional[str] = Query(None,
     for league in LEAGUE_URL_SEGMENTS:
         all_predictions.extend(_predict_league(league, max_date=cutoff))
 
+    dated = [p for p in all_predictions if p.date]
+    if not dated:
+        raise HTTPException(status_code=404, detail=f"no upcoming matches in the next {COMBO_WINDOW_DAYS} days")
+    window_start = min(p.date for p in dated)
+    window_end = (date.fromisoformat(window_start) + timedelta(days=ROUND_WINDOW_DAYS - 1)).isoformat()
+    pool = [p for p in dated if window_start <= p.date <= window_end]
+
     if outcome:
         prob_field = {"H": "ensemble_prob_home", "D": "ensemble_prob_draw", "A": "ensemble_prob_away"}[outcome]
-        odds_field = {"H": "odds_home", "D": "odds_draw", "A": "odds_away"}[outcome]
-        scored = [(p, getattr(p, prob_field), getattr(p, odds_field), outcome) for p in all_predictions]
+        scored = [(p, getattr(p, prob_field), outcome) for p in pool]
     else:
-        outcome_odds_field = {"H": "odds_home", "D": "odds_draw", "A": "odds_away"}
-        scored = [
-            (p, p.predicted_probability, getattr(p, outcome_odds_field[p.predicted_outcome]), p.predicted_outcome)
-            for p in all_predictions
-        ]
+        scored = [(p, p.predicted_probability, p.predicted_outcome) for p in pool]
 
-    # Group by calendar date, not (league, round): round numbers aren't
-    # comparable across leagues (K1's round 19 means nothing next to BL1's
-    # round 3), but "these matches are all being played the same day" is a
-    # league-agnostic way to keep a combo temporally coherent while still
-    # allowing K1+K2+BL1 legs to mix.
-    groups: dict[str, list] = {}
-    for c in scored:
-        key = c[0].date or ""
-        groups.setdefault(key, []).append(c)
+    scored.sort(key=lambda c: c[1], reverse=True)
 
-    best: tuple[list, float] | None = None
-    # Earliest date first, and stop at the first date with a viable combo --
-    # this is meant to be checked shortly before today's kickoff, so "the
-    # nearest actionable slate" beats "whichever date within the next 10
-    # days happens to have the highest combined probability."
-    for match_date in sorted(groups):
-        group = groups[match_date]
-        group.sort(key=lambda c: c[1], reverse=True)
-
-        # A combo's legs are assumed independent when multiplying their
-        # probabilities together -- that breaks if the same team shows up
-        # twice (its current form/rotation correlates both results), so skip
-        # any candidate that shares a team with a leg already picked.
-        chosen = []
-        used_teams: set[str] = set()
-        for c in group:
-            teams = {c[0].home_team, c[0].away_team}
-            if teams & used_teams:
-                continue
-            chosen.append(c)
-            used_teams |= teams
-            if len(chosen) == legs:
-                break
-
-        if len(chosen) < legs:
+    # A combo's legs are assumed independent when multiplying their
+    # probabilities together -- that breaks if the same team shows up twice
+    # (its current form/rotation correlates both results), so skip any
+    # candidate that shares a team with a leg already picked.
+    chosen: list[tuple[Prediction, float, str]] = []
+    used_teams: set[str] = set()
+    for p, prob, leg_outcome in scored:
+        teams = {p.home_team, p.away_team}
+        if teams & used_teams:
             continue
+        chosen.append((p, prob, leg_outcome))
+        used_teams |= teams
+        if len(chosen) == legs:
+            break
 
-        combined = 1.0
-        for _, prob, _, _ in chosen:
-            combined *= prob
-
-        best = (chosen, combined)
-        break
-
-    if best is None:
+    if len(chosen) < legs:
         raise HTTPException(
             status_code=404,
-            detail=f"no single date has {legs} matches with non-overlapping teams in the next {COMBO_WINDOW_DAYS} days",
+            detail=(
+                f"only {len(chosen)} matches with non-overlapping teams in the "
+                f"{window_start}~{window_end} window, need {legs}"
+            ),
         )
 
-    top, combined = best
+    combined = 1.0
+    for _, prob, _ in chosen:
+        combined *= prob
 
     return Combo(
         legs=[
             ComboLeg(
                 league=p.league,
                 date=p.date,
+                round=p.round,
                 home_team=p.home_team,
                 away_team=p.away_team,
                 predicted_outcome=leg_outcome,
                 predicted_probability=prob,
-                odds=odds,
+                odds={"H": p.odds_home, "D": p.odds_draw, "A": p.odds_away}[leg_outcome],
+                elo_prob_home=p.elo_prob_home,
+                elo_prob_draw=p.elo_prob_draw,
+                elo_prob_away=p.elo_prob_away,
+                poisson_prob_home=p.poisson_prob_home,
+                poisson_prob_draw=p.poisson_prob_draw,
+                poisson_prob_away=p.poisson_prob_away,
+                ensemble_prob_home=p.ensemble_prob_home,
+                ensemble_prob_draw=p.ensemble_prob_draw,
+                ensemble_prob_away=p.ensemble_prob_away,
+                odds_home=p.odds_home,
+                odds_draw=p.odds_draw,
+                odds_away=p.odds_away,
             )
-            for p, prob, odds, leg_outcome in top
+            for p, prob, leg_outcome in chosen
         ],
         combined_probability=combined,
     )

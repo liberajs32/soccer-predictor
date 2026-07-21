@@ -252,6 +252,19 @@ body {
   color: #fff;
 }
 
+.combo-leg-detail-toggle {
+  display: block;
+  width: 100%;
+  margin-top: 0.7rem;
+  padding: 0.4rem;
+  border-radius: 8px;
+  border: 1px dashed #2a4a3a;
+  background: transparent;
+  color: #8fae9c;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
 .combo-intro {
   font-size: 0.85rem;
   color: #a9c9b8;

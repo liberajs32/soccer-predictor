@@ -42,15 +42,62 @@ function ProbGrid({ home, draw, away, homeLabel, awayLabel, predicted }) {
   )
 }
 
-function MatchCard({ match }) {
+function PredictionDetail({ item }) {
   const marketProbs = useMemo(() => {
-    const { odds_home, odds_draw, odds_away } = match
+    const { odds_home, odds_draw, odds_away } = item
     if (!odds_home || !odds_draw || !odds_away) return null
     const inv = [1 / odds_home, 1 / odds_draw, 1 / odds_away]
     const total = inv[0] + inv[1] + inv[2]
     return inv.map((x) => x / total)
-  }, [match])
+  }, [item])
 
+  const homeLabel = item.home_team
+  const awayLabel = item.away_team
+
+  return (
+    <>
+      <div className="model-row secondary">
+        <span className="model-name">Poisson 모델</span>
+      </div>
+      <ProbGrid
+        home={item.poisson_prob_home}
+        draw={item.poisson_prob_draw}
+        away={item.poisson_prob_away}
+        homeLabel={homeLabel}
+        awayLabel={awayLabel}
+      />
+
+      <div className="model-row secondary">
+        <span className="model-name">Elo 기준</span>
+      </div>
+      <ProbGrid
+        home={item.elo_prob_home}
+        draw={item.elo_prob_draw}
+        away={item.elo_prob_away}
+        homeLabel={homeLabel}
+        awayLabel={awayLabel}
+      />
+
+      {marketProbs && (
+        <>
+          <div className="model-row secondary">
+            <span className="model-name">배당(시장 내재확률)</span>
+            <span className="odds-caption">{item.odds_home} / {item.odds_draw} / {item.odds_away}</span>
+          </div>
+          <ProbGrid
+            home={marketProbs[0]}
+            draw={marketProbs[1]}
+            away={marketProbs[2]}
+            homeLabel={homeLabel}
+            awayLabel={awayLabel}
+          />
+        </>
+      )}
+    </>
+  )
+}
+
+function MatchCard({ match }) {
   const homeLabel = match.home_team
   const awayLabel = match.away_team
 
@@ -66,75 +113,68 @@ function MatchCard({ match }) {
         <span className="team away">{match.away_team}</span>
       </div>
 
-      {'ensemble_prob_home' in match ? (
-        <>
-          <div className="model-row">
-            <span className="model-name">종합 예측</span>
-            <span className="predicted-outcome">{OUTCOME_LABEL[match.predicted_outcome]}</span>
-          </div>
-          <ProbGrid
-            home={match.ensemble_prob_home}
-            draw={match.ensemble_prob_draw}
-            away={match.ensemble_prob_away}
-            homeLabel={homeLabel}
-            awayLabel={awayLabel}
-            predicted={match.predicted_outcome}
-          />
+      <div className="model-row">
+        <span className="model-name">종합 예측</span>
+        <span className="predicted-outcome">{OUTCOME_LABEL[match.predicted_outcome]}</span>
+      </div>
+      <ProbGrid
+        home={match.ensemble_prob_home}
+        draw={match.ensemble_prob_draw}
+        away={match.ensemble_prob_away}
+        homeLabel={homeLabel}
+        awayLabel={awayLabel}
+        predicted={match.predicted_outcome}
+      />
 
-          <div className="model-row secondary">
-            <span className="model-name">Poisson 모델</span>
-          </div>
-          <ProbGrid
-            home={match.poisson_prob_home}
-            draw={match.poisson_prob_draw}
-            away={match.poisson_prob_away}
-            homeLabel={homeLabel}
-            awayLabel={awayLabel}
-          />
-
-          <div className="model-row secondary">
-            <span className="model-name">Elo 기준</span>
-          </div>
-          <ProbGrid
-            home={match.elo_prob_home}
-            draw={match.elo_prob_draw}
-            away={match.elo_prob_away}
-            homeLabel={homeLabel}
-            awayLabel={awayLabel}
-          />
-        </>
-      ) : null}
-
-      {marketProbs && (
-        <>
-          <div className="model-row secondary">
-            <span className="model-name">배당(시장 내재확률)</span>
-            <span className="odds-caption">{match.odds_home} / {match.odds_draw} / {match.odds_away}</span>
-          </div>
-          <ProbGrid
-            home={marketProbs[0]}
-            draw={marketProbs[1]}
-            away={marketProbs[2]}
-            homeLabel={homeLabel}
-            awayLabel={awayLabel}
-          />
-        </>
-      )}
+      <PredictionDetail item={match} />
     </article>
   )
 }
 
 const COMBO_OUTCOME_OPTIONS = [
-  { value: '', label: '종합' },
-  { value: 'H', label: '홈승' },
-  { value: 'D', label: '무무' },
-  { value: 'A', label: '원정승' },
+  { value: '', label: '추천 조합' },
+  { value: 'D', label: '무무 조합' },
 ]
 
 function comboIntro(outcome, n) {
-  if (!outcome) return `전 리그 통틀어 종합 예측 확신도가 가장 높은 ${n}경기를 묶었습니다.`
+  if (!outcome) return `가장 가까운 라운드에서 종합 예측 확신도가 가장 높은 ${n}경기를 묶었습니다.`
   const label = OUTCOME_LABEL[outcome]
-  return `전 리그 통틀어 "${label}" 확률이 가장 높은 ${n}경기를 묶었습니다. 그 경기의 최선 예측이 아니어도, ${label} 확률 자체가 높은 순으로 골랐습니다.`
+  return `가장 가까운 라운드에서 "${label}" 확률이 가장 높은 ${n}경기를 묶었습니다. 그 경기의 최선 예측이 아니어도, ${label} 확률 자체가 높은 순으로 골랐습니다.`
+}
+
+function ComboLegCard({ leg }) {
+  const [expanded, setExpanded] = useState(false)
+
+  return (
+    <article className="match-card combo-leg">
+      <header>
+        <span className="round">{LEAGUE_LABEL[leg.league] || leg.league} · {leg.round || ''}</span>
+        <span className="date">{formatDate(leg.date)}</span>
+      </header>
+      <div className="teams">
+        <span className="team home">{leg.home_team}</span>
+        <span className="vs">vs</span>
+        <span className="team away">{leg.away_team}</span>
+      </div>
+      <div className="model-row">
+        <span className="model-name">예측</span>
+        <span className="predicted-outcome">
+          {OUTCOME_LABEL[leg.predicted_outcome]} · {(leg.predicted_probability * 100).toFixed(0)}%
+        </span>
+      </div>
+      {leg.odds != null && (
+        <div className="model-row secondary">
+          <span className="model-name">배당</span>
+          <span className="odds-caption">{leg.odds}</span>
+        </div>
+      )}
+
+      <button className="combo-leg-detail-toggle" onClick={() => setExpanded((v) => !v)}>
+        {expanded ? '상세 접기 ▲' : '상세 보기 (승/무/패 비율) ▼'}
+      </button>
+      {expanded && <PredictionDetail item={leg} />}
+    </article>
+  )
 }
 
 function ComboView({ combo, outcome, onOutcomeChange }) {
@@ -154,29 +194,7 @@ function ComboView({ combo, outcome, onOutcomeChange }) {
       <p className="combo-intro">{comboIntro(outcome, combo.legs.length)}</p>
       <div className="combo-legs">
         {combo.legs.map((leg, i) => (
-          <article key={i} className="match-card combo-leg">
-            <header>
-              <span className="round">{LEAGUE_LABEL[leg.league] || leg.league}</span>
-              <span className="date">{formatDate(leg.date)}</span>
-            </header>
-            <div className="teams">
-              <span className="team home">{leg.home_team}</span>
-              <span className="vs">vs</span>
-              <span className="team away">{leg.away_team}</span>
-            </div>
-            <div className="model-row">
-              <span className="model-name">예측</span>
-              <span className="predicted-outcome">
-                {OUTCOME_LABEL[leg.predicted_outcome]} · {(leg.predicted_probability * 100).toFixed(0)}%
-              </span>
-            </div>
-            {leg.odds != null && (
-              <div className="model-row secondary">
-                <span className="model-name">배당</span>
-                <span className="odds-caption">{leg.odds}</span>
-              </div>
-            )}
-          </article>
+          <ComboLegCard key={i} leg={leg} />
         ))}
       </div>
       <div className="combo-result">
