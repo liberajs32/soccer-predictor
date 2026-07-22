@@ -1,16 +1,11 @@
-# React + Vite
+# soccer-predictor 프론트엔드
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+Vite + React PWA. 리그별 예측(EPL/K리그1/K리그2/분데스리가)과 추천 조합/무무 조합을 보여준다.
 
-Currently, two official plugins are available:
+```
+npm install
+npm run dev      # 로컬 개발 서버
+npm run build    # 프로덕션 빌드 (PWA 매니페스트/서비스워커 포함)
+```
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+`VITE_API_BASE` 환경변수로 백엔드 API 주소를 지정한다 (`.env` 참고).
