@@ -236,20 +236,17 @@ def predictions(league: str = Query(...)):
 
 
 COMBO_WINDOW_DAYS = 10
-# How many days wide the "nearest round" pool is. A K League round alone can
-# span multiple days (Fri-Mon, or a Tue/Wed makeup slate), and picks should
-# be free to come from any of those days, not just the single closest one.
-ROUND_WINDOW_DAYS = 4
 
 
 @app.get("/combo", response_model=Combo)
 def combo(legs: int = Query(2, ge=2, le=4), outcome: Optional[str] = Query(None, pattern="^[HDA]$")):
-    """Recommend a combo from the nearest ROUND_WINDOW_DAYS-day window of
-    matches (across all leagues -- "round" isn't comparable across leagues,
-    K1's round 19 vs BL1's round 3 mean nothing next to each other, so a
-    rolling date window is the league-agnostic stand-in for "this is the
-    next coherent slate of matches"), restricted overall to COMBO_WINDOW_DAYS
-    so it's never a lopsided fixture months out with no odds posted yet.
+    """Recommend a combo from each league's own nearest round (every match
+    sharing that round's label, however many days it spans), pooled across
+    all 4 leagues, restricted overall to COMBO_WINDOW_DAYS so it's never a
+    lopsided fixture months out with no odds posted yet. Round labels aren't
+    comparable across leagues (K1's round 19 vs BL1's round 3 mean nothing
+    next to each other), but each league's own nearest round is still a
+    real, coherent slate that's safe to combine with another league's.
 
     Without `outcome`: ranks by each match's own best-outcome probability --
     may mix home/draw/away picks.
@@ -268,9 +265,24 @@ def combo(legs: int = Query(2, ge=2, le=4), outcome: Optional[str] = Query(None,
     dated = [p for p in all_predictions if p.date]
     if not dated:
         raise HTTPException(status_code=404, detail=f"no upcoming matches in the next {COMBO_WINDOW_DAYS} days")
-    window_start = min(p.date for p in dated)
-    window_end = (date.fromisoformat(window_start) + timedelta(days=ROUND_WINDOW_DAYS - 1)).isoformat()
-    pool = [p for p in dated if window_start <= p.date <= window_end]
+
+    # For each league independently, find its own nearest round (the round
+    # containing that league's earliest upcoming match) and take every
+    # match in that round, however many days it spans -- a date window
+    # (e.g. "next 4 days") is only a guess at a round's boundary and can
+    # bleed into the *next* round once it starts, silently mixing two
+    # rounds that were never actually on the same betting slip. The `round`
+    # field is the real boundary. Rounds aren't comparable across leagues
+    # (K1's "19. Round" and K2's "19. Round" are unrelated schedules), but
+    # each league's own nearest round is still safe to combine with
+    # another league's own nearest round.
+    pool: list[Prediction] = []
+    for league in LEAGUE_URL_SEGMENTS:
+        league_matches = [p for p in dated if p.league == league]
+        if not league_matches:
+            continue
+        nearest_round = min(league_matches, key=lambda p: p.date).round
+        pool.extend(p for p in league_matches if p.round == nearest_round)
 
     if outcome:
         prob_field = {"H": "ensemble_prob_home", "D": "ensemble_prob_draw", "A": "ensemble_prob_away"}[outcome]
