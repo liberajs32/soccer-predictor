@@ -1,22 +1,34 @@
 """Blend the Elo, Poisson, and (when available) market-implied probabilities
 into a single prediction.
 
-Weights are a fixed heuristic, not fit by optimization: the backtests run
-during development consistently ranked Market >= Poisson ~= Elo across all
-four leagues, so the market (when we have odds for a fixture) gets the
-largest share, Poisson next, Elo least. This is a deliberate simplification
-for a personal project's scale -- see model/backtest.py's "Ensemble" row for
-how it actually performs before tuning further.
+Weights are grid-searched per league (model/optimize_weights.py), optimizing
+backtest *accuracy* rather than log_loss -- the app outputs a single 1X2
+pick, so what matters is how often the argmax is right, not how well the
+full distribution is calibrated. EPL/K1/BL1 markets turned out efficient
+enough that our own Elo/Poisson barely move the needle over market alone;
+K2 -- much lower betting volume/liquidity -- is the one league where
+blending in Poisson meaningfully helps. Re-run optimize_weights.py as more
+results accumulate (data as of 2026-07-23, ~2000 decided matches pooled) and
+update these.
 """
 
-WEIGHTS_WITH_MARKET = {"market": 0.5, "poisson": 0.3, "elo": 0.2}
+WEIGHTS_WITH_MARKET = {
+    "EPL": {"market": 0.90, "poisson": 0.05, "elo": 0.05},
+    "K1": {"market": 0.95, "poisson": 0.00, "elo": 0.05},
+    "K2": {"market": 0.55, "poisson": 0.35, "elo": 0.10},
+    "BL1": {"market": 0.95, "poisson": 0.05, "elo": 0.00},
+}
+DEFAULT_WEIGHTS_WITH_MARKET = {"market": 0.90, "poisson": 0.05, "elo": 0.05}
 WEIGHTS_NO_MARKET = {"poisson": 0.6, "elo": 0.4}
 
 Probs = tuple[float, float, float]
 
 
-def blend_probs(elo: Probs, poisson: Probs, market: Probs | None = None) -> Probs:
-    weights = WEIGHTS_WITH_MARKET if market is not None else WEIGHTS_NO_MARKET
+def blend_probs(elo: Probs, poisson: Probs, market: Probs | None = None, league: str | None = None) -> Probs:
+    if market is not None:
+        weights = WEIGHTS_WITH_MARKET.get(league, DEFAULT_WEIGHTS_WITH_MARKET)
+    else:
+        weights = WEIGHTS_NO_MARKET
 
     components = {"elo": elo, "poisson": poisson}
     if market is not None:

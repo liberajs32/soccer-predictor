@@ -111,7 +111,7 @@ def backtest_league(conn, league: str) -> None:
         if mkt_probs is not None:
             market_predictions.append((mkt_probs, outcome))
 
-        ensemble_predictions.append((blend_probs(elo_probs, poisson_probs, mkt_probs), outcome))
+        ensemble_predictions.append((blend_probs(elo_probs, poisson_probs, mkt_probs, league=league), outcome))
 
     evaluate("Elo", elo_predictions)
     evaluate("Poisson", poisson_predictions)

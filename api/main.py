@@ -206,7 +206,7 @@ def _predict_league(league: str, max_date: str | None = None) -> list[Prediction
     for m in upcoming:
         elo_probs = elo.predict_proba(m["home_team"], m["away_team"])
         poisson_probs = poisson.predict_proba(m["home_team"], m["away_team"])
-        ensemble_probs = blend_probs(elo_probs, poisson_probs, _market_probs(m))
+        ensemble_probs = blend_probs(elo_probs, poisson_probs, _market_probs(m), league=league)
         best_idx = ensemble_probs.index(max(ensemble_probs))
         predicted = ["H", "D", "A"][best_idx]
         results.append(
