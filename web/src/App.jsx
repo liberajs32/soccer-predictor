@@ -97,14 +97,17 @@ function PredictionDetail({ item }) {
   )
 }
 
-function MatchCard({ match }) {
+function MatchCard({ match, recommended }) {
   const homeLabel = match.home_team
   const awayLabel = match.away_team
 
   return (
-    <article className="match-card">
+    <article className={`match-card${recommended ? ' recommended' : ''}`}>
       <header>
-        <span className="round">{match.round || ''}</span>
+        <span className="round">
+          {match.round || ''}
+          {recommended && <span className="recommended-badge">⭐ 추천 조합</span>}
+        </span>
         <span className="date">{formatDate(match.date)}</span>
       </header>
       <div className="teams">
@@ -218,8 +221,27 @@ function App() {
   const [refreshState, setRefreshState] = useState('idle') // idle | loading | done | error
   const [refreshMessage, setRefreshMessage] = useState('')
   const [dataVersion, setDataVersion] = useState(0)
+  const [recommendedKeys, setRecommendedKeys] = useState(new Set())
 
   const isCombo = league === COMBO_TAB
+
+  // Independent of the active tab, so switching leagues doesn't need a
+  // refetch -- same set of picks highlights across every league's list.
+  useEffect(() => {
+    let cancelled = false
+    fetch(`${API_BASE}/combo?legs=2`)
+      .then((res) => (res.ok ? res.json() : { legs: [] }))
+      .then((data) => {
+        if (cancelled) return
+        setRecommendedKeys(new Set(data.legs.map((l) => `${l.league}|${l.date}|${l.home_team}|${l.away_team}`)))
+      })
+      .catch(() => {
+        if (!cancelled) setRecommendedKeys(new Set())
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [dataVersion])
 
   useEffect(() => {
     let cancelled = false
@@ -321,7 +343,11 @@ function App() {
         {!isCombo && (
           <div className="match-list">
             {matches.map((m) => (
-              <MatchCard key={m.id} match={m} />
+              <MatchCard
+                key={m.id}
+                match={m}
+                recommended={recommendedKeys.has(`${league}|${m.date}|${m.home_team}|${m.away_team}`)}
+              />
             ))}
           </div>
         )}

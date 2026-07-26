@@ -19,7 +19,7 @@ from pydantic import BaseModel
 
 from db import get_connection, upsert_matches
 from elo import EloModel, outcome_label
-from ensemble import blend_probs
+from ensemble import blend_probs, MODEL_VERSION
 from poisson import PoissonModel
 from betexplorer import LEAGUE_URL_SEGMENTS, fetch_fixtures, fetch_season
 
@@ -189,6 +189,32 @@ def fixtures(league: str = Query(...)):
     return _fetch_upcoming(_db(), league)
 
 
+def _log_prediction(conn, match_id: int, probs: tuple[float, float, float], predicted_outcome: str) -> None:
+    """Freeze the first prediction made for this match under the current
+    model version, so accuracy can be checked later against the actual
+    result -- without this, /predictions only ever showed a live number
+    that vanished once the match kicked off. Only logs once per
+    (match, model_version): re-predicting the same still-upcoming fixture
+    on every page load must not spam duplicate rows. This locks in
+    whatever prediction happens to be computed first (which can be days
+    before kickoff, before odds firm up) rather than the closing line --
+    fine for now, revisit if that skews the accuracy numbers."""
+    existing = conn.execute(
+        "SELECT 1 FROM predictions WHERE match_id = ? AND model_version = ?",
+        (match_id, MODEL_VERSION),
+    ).fetchone()
+    if existing:
+        return
+    conn.execute(
+        """
+        INSERT INTO predictions (match_id, model_version, prob_home, prob_draw, prob_away, predicted_outcome)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (match_id, MODEL_VERSION, probs[0], probs[1], probs[2], predicted_outcome),
+    )
+    conn.commit()
+
+
 def _predict_league(league: str, max_date: str | None = None) -> list[Prediction]:
     upcoming = _fetch_upcoming(_db(), league)
     if max_date:
@@ -209,6 +235,7 @@ def _predict_league(league: str, max_date: str | None = None) -> list[Prediction
         ensemble_probs = blend_probs(elo_probs, poisson_probs, _market_probs(m), league=league)
         best_idx = ensemble_probs.index(max(ensemble_probs))
         predicted = ["H", "D", "A"][best_idx]
+        _log_prediction(_db(), m["id"], ensemble_probs, predicted)
         results.append(
             Prediction(
                 **m,

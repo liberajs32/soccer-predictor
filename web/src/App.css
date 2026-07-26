@@ -116,6 +116,17 @@ body {
   padding: 0.9rem 1rem;
 }
 
+.match-card.recommended {
+  background: #2a230c;
+  border-color: #d9b34a;
+}
+
+.recommended-badge {
+  margin-left: 0.5rem;
+  color: #d9b34a;
+  font-weight: 600;
+}
+
 .match-card header {
   display: flex;
   justify-content: space-between;

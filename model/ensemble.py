@@ -21,6 +21,8 @@ WEIGHTS_WITH_MARKET = {
 DEFAULT_WEIGHTS_WITH_MARKET = {"market": 0.90, "poisson": 0.05, "elo": 0.05}
 WEIGHTS_NO_MARKET = {"poisson": 0.6, "elo": 0.4}
 
+MODEL_VERSION = "per-league-v1"
+
 Probs = tuple[float, float, float]
 
 
