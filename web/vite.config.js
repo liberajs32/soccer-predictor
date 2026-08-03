@@ -36,7 +36,7 @@ export default defineConfig({
           {
             urlPattern: ({ url }) => ['/fixtures', '/predictions', '/combo'].includes(url.pathname),
             handler: 'NetworkFirst',
-            options: { cacheName: 'api-cache', networkTimeoutSeconds: 60 },
+            options: { cacheName: 'api-cache', networkTimeoutSeconds: 150 },
           },
         ],
       },

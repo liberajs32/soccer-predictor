@@ -68,6 +68,12 @@ body {
   color: #e0897a;
 }
 
+.data-as-of {
+  font-size: 0.72rem;
+  color: #6f9080;
+  margin: -0.2rem 0 0.6rem;
+}
+
 .league-tabs {
   display: flex;
   gap: 0.5rem;

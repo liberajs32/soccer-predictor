@@ -222,6 +222,7 @@ function App() {
   const [refreshMessage, setRefreshMessage] = useState('')
   const [dataVersion, setDataVersion] = useState(0)
   const [recommendedKeys, setRecommendedKeys] = useState(new Set())
+  const [dataAsOf, setDataAsOf] = useState(null)
 
   const isCombo = league === COMBO_TAB
 
@@ -255,6 +256,12 @@ function App() {
     fetch(url)
       .then((res) => {
         if (!res.ok) throw new Error(`API ${res.status}`)
+        // The Date header reflects when this exact response was generated --
+        // for a PWA cache fallback (see vite.config.js) that's the original
+        // server response time, not "now", so it's the honest way to show
+        // the user how stale a served-from-cache screen actually is.
+        const served = res.headers.get('date')
+        if (served) setDataAsOf(new Date(served))
         return res.json()
       })
       .then((data) => {
@@ -309,6 +316,11 @@ function App() {
         </div>
         {refreshMessage && (
           <p className={`refresh-message ${refreshState === 'error' ? 'error' : ''}`}>{refreshMessage}</p>
+        )}
+        {dataAsOf && (
+          <p className="data-as-of">
+            데이터 기준: {dataAsOf.toLocaleString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+          </p>
         )}
         <nav className="league-tabs">
           {LEAGUES.map((l) => (

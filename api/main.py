@@ -30,6 +30,10 @@ app.add_middleware(
     allow_origins=["*"],  # personal/local project; tighten if ever deployed publicly
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
+    # CORS hides most response headers from JS by default -- Date isn't in
+    # the safelisted set, and the frontend reads it to show "data as of"
+    # (see App.jsx), so it needs to be explicitly exposed.
+    expose_headers=["date"],
 )
 
 # The underlying training data only changes once a day (the scheduled scrape
