@@ -381,6 +381,27 @@ def combo(legs: int = Query(2, ge=2, le=4), outcome: Optional[str] = Query(None,
     )
 
 
+@app.get("/accuracy")
+def accuracy():
+    """Raw dump of every logged prediction whose match has a final score, for
+    offline accuracy analysis. No aggregation here -- what's worth breaking
+    out (per-league, by confidence, recent-only) changes with the question
+    being asked, so keep this endpoint dumb and do the slicing client-side."""
+    rows = _db().execute(
+        """
+        SELECT m.league, m.date, m.round, m.home_team, m.away_team,
+               m.home_score, m.away_score,
+               p.model_version, p.predicted_outcome,
+               p.prob_home, p.prob_draw, p.prob_away, p.created_at
+        FROM predictions p
+        JOIN matches m ON m.id = p.match_id
+        WHERE m.home_score IS NOT NULL AND m.away_score IS NOT NULL
+        ORDER BY m.date ASC
+        """
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
 class RefreshResult(BaseModel):
     updated_rows: int
     leagues: list[str]
