@@ -139,8 +139,13 @@ class _TursoConnection:
         )
         if resp.status_code != 200:
             raise RuntimeError(f"Turso execute failed ({resp.status_code}): {resp.text}")
-        result = resp.json()["result"]
-        return _LibsqlCursor(self._rows_from_result(result))
+        body = resp.json()
+        if "result" not in body:
+            # Turso can return HTTP 200 with a statement-level error (e.g. a
+            # bad SQL query) instead of a result -- surface the actual body
+            # instead of letting `["result"]` raise an opaque KeyError.
+            raise RuntimeError(f"Turso execute returned no result: {body}")
+        return _LibsqlCursor(self._rows_from_result(body["result"]))
 
     def executescript(self, sql: str) -> None:
         for stmt in (s.strip() for s in sql.split(";")):
