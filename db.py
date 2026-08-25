@@ -58,6 +58,15 @@ CREATE TABLE IF NOT EXISTS predictions (
     predicted_outcome TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- _log_prediction() in api/main.py checks "WHERE match_id = ? AND
+-- model_version = ?" before every insert, once per upcoming match, on every
+-- /predictions and /combo call. Without this index that's a full table scan
+-- of a table that only grows, so the read cost per request kept climbing
+-- the longer the app ran -- this is what actually burned through Turso's
+-- monthly row-read quota.
+CREATE INDEX IF NOT EXISTS idx_predictions_match_model
+    ON predictions(match_id, model_version);
 """
 
 def _clean_env(name: str) -> str | None:
