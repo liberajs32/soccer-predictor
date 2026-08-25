@@ -67,6 +67,25 @@ CREATE TABLE IF NOT EXISTS predictions (
 -- monthly row-read quota.
 CREATE INDEX IF NOT EXISTS idx_predictions_match_model
     ON predictions(match_id, model_version);
+
+-- Freezes which matches /combo actually recommended, so accuracy can be
+-- checked later against the real historical picks instead of an
+-- approximation reconstructed from /predictions logs (which include every
+-- upcoming match a user ever viewed, not just the ones that were
+-- recommended). outcome is stored as '' rather than NULL for the
+-- no-forced-outcome case, so the dedupe lookup in _log_combo_pick() stays a
+-- plain equality check.
+CREATE TABLE IF NOT EXISTS combo_picks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    match_id INTEGER NOT NULL REFERENCES matches(id),
+    model_version TEXT NOT NULL,
+    legs INTEGER NOT NULL,
+    outcome TEXT NOT NULL,
+    logged_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_combo_picks_dedupe
+    ON combo_picks(match_id, model_version, legs, outcome);
 """
 
 def _clean_env(name: str) -> str | None:

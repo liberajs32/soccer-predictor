@@ -219,6 +219,26 @@ def _log_prediction(conn, match_id: int, probs: tuple[float, float, float], pred
     conn.commit()
 
 
+def _log_combo_pick(conn, match_id: int, legs: int, outcome: str) -> None:
+    """Freeze which matches /combo actually recommended, under this exact
+    (legs, outcome) config, so recommended-combo accuracy can be checked
+    later against real historical picks. Only logs once per
+    (match, model_version, legs, outcome): the same nearest-round match can
+    show up as a combo pick on every page load until kickoff, and that must
+    not spam duplicate rows."""
+    existing = conn.execute(
+        "SELECT 1 FROM combo_picks WHERE match_id = ? AND model_version = ? AND legs = ? AND outcome = ?",
+        (match_id, MODEL_VERSION, legs, outcome),
+    ).fetchone()
+    if existing:
+        return
+    conn.execute(
+        "INSERT INTO combo_picks (match_id, model_version, legs, outcome) VALUES (?, ?, ?, ?)",
+        (match_id, MODEL_VERSION, legs, outcome),
+    )
+    conn.commit()
+
+
 def _predict_league(league: str, max_date: str | None = None) -> list[Prediction]:
     upcoming = _fetch_upcoming(_db(), league)
     if max_date:
@@ -348,8 +368,9 @@ def combo(legs: int = Query(2, ge=2, le=4), outcome: Optional[str] = Query(None,
         )
 
     combined = 1.0
-    for _, prob, _ in chosen:
+    for p, prob, _ in chosen:
         combined *= prob
+        _log_combo_pick(_db(), p.id, legs, outcome or "")
 
     return Combo(
         legs=[
@@ -392,7 +413,11 @@ def accuracy():
         SELECT m.league, m.date, m.round, m.home_team, m.away_team,
                m.home_score, m.away_score,
                p.model_version, p.predicted_outcome,
-               p.prob_home, p.prob_draw, p.prob_away, p.created_at
+               p.prob_home, p.prob_draw, p.prob_away, p.created_at,
+               EXISTS(
+                   SELECT 1 FROM combo_picks c
+                   WHERE c.match_id = p.match_id AND c.model_version = p.model_version
+               ) AS recommended
         FROM predictions p
         JOIN matches m ON m.id = p.match_id
         WHERE m.home_score IS NOT NULL AND m.away_score IS NOT NULL
